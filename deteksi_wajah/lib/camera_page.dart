@@ -13,7 +13,7 @@ class CameraPage extends StatefulWidget {
 
 class _CameraPageState extends State<CameraPage> {
   late CameraController _controller;
-  late Future<void> _initializeControllerFuture;
+  Future<void>? _initializeControllerFuture;
 
   List<CameraDescription>? cameras;
   int selectedCameraIndex = 0;
@@ -22,9 +22,9 @@ class _CameraPageState extends State<CameraPage> {
   void initState() {
     super.initState();
 
-    _initCamera(); //  ganti dari controller manual
+    _initCamera();
 
-    // ✅ Popup setelah UI siap (TIDAK ERROR)
+    // Popup panduan setelah UI siap
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (mounted) {
         _showGuidePopup();
@@ -34,20 +34,43 @@ class _CameraPageState extends State<CameraPage> {
 
   @override
   void dispose() {
-    _controller.dispose();
+    if (_initializeControllerFuture != null) {
+      _controller.dispose();
+    }
     super.dispose();
   }
 
   Future<void> _initCamera() async {
-    cameras = await availableCameras();
+    try {
+      cameras = await availableCameras();
 
-    _controller = CameraController(
-      cameras![selectedCameraIndex],
-      ResolutionPreset.medium,
-    );
+      // Gunakan kamera yang dikirim dari HomePage jika tersedia
+      if (cameras != null && cameras!.isNotEmpty) {
+        selectedCameraIndex = cameras!.indexWhere(
+          (camera) => camera.name == widget.camera.name,
+        );
 
-    _initializeControllerFuture = _controller.initialize();
-    setState(() {});
+        if (selectedCameraIndex < 0) {
+          selectedCameraIndex = 0;
+        }
+      }
+
+      _controller = CameraController(
+        cameras![selectedCameraIndex],
+        ResolutionPreset.medium,
+        enableAudio: false,
+      );
+
+      _initializeControllerFuture = _controller.initialize();
+
+      await _initializeControllerFuture;
+
+      if (mounted) {
+        setState(() {});
+      }
+    } catch (e) {
+      print("Error inisialisasi kamera: $e");
+    }
   }
 
   Future<void> _switchCamera() async {
@@ -60,21 +83,35 @@ class _CameraPageState extends State<CameraPage> {
     _controller = CameraController(
       cameras![selectedCameraIndex],
       ResolutionPreset.medium,
+      enableAudio: false,
     );
 
     _initializeControllerFuture = _controller.initialize();
 
-    setState(() {});
+    await _initializeControllerFuture;
+
+    if (mounted) {
+      setState(() {});
+    }
   }
 
   Future<void> _takePicture() async {
-    await _initializeControllerFuture;
-    final image = await _controller.takePicture();
+    try {
+      if (_initializeControllerFuture == null) return;
 
-    Navigator.pop(context, File(image.path));
+      await _initializeControllerFuture;
+
+      final image = await _controller.takePicture();
+
+      if (!mounted) return;
+
+      Navigator.pop(context, File(image.path));
+    } catch (e) {
+      print("Error mengambil gambar: $e");
+    }
   }
 
-  // ✅ Popup panduan
+  // Popup panduan
   void _showGuidePopup() {
     showDialog(
       context: context,
@@ -102,18 +139,27 @@ class _CameraPageState extends State<CameraPage> {
 
   @override
   Widget build(BuildContext context) {
+    // Jika kamera belum selesai diinisialisasi
+    if (_initializeControllerFuture == null) {
+      return const Scaffold(
+        backgroundColor: Colors.black,
+        body: Center(child: CircularProgressIndicator()),
+      );
+    }
+
     return Scaffold(
       backgroundColor: Colors.black,
-      body: FutureBuilder(
+      body: FutureBuilder<void>(
         future: _initializeControllerFuture,
         builder: (context, snapshot) {
-          if (snapshot.connectionState == ConnectionState.done) {
+          if (snapshot.connectionState == ConnectionState.done &&
+              snapshot.hasError == false) {
             return Stack(
               children: [
-                // 📸 Camera Preview
+                // Camera Preview
                 Positioned.fill(child: CameraPreview(_controller)),
 
-                // 🔥 Frame wajah (biar user tau posisi)
+                // Frame wajah
                 Center(
                   child: Container(
                     width: 250,
@@ -125,7 +171,7 @@ class _CameraPageState extends State<CameraPage> {
                   ),
                 ),
 
-                // 🔙 Tombol back
+                // Tombol back
                 Positioned(
                   top: 40,
                   left: 20,
@@ -138,6 +184,7 @@ class _CameraPageState extends State<CameraPage> {
                   ),
                 ),
 
+                // Tombol ganti kamera
                 Positioned(
                   top: 40,
                   right: 20,
@@ -153,7 +200,7 @@ class _CameraPageState extends State<CameraPage> {
                   ),
                 ),
 
-                // 📸 CAPTURE
+                // Tombol capture
                 Positioned(
                   bottom: 40,
                   left: 0,
@@ -179,13 +226,22 @@ class _CameraPageState extends State<CameraPage> {
                     ),
                   ),
                 ),
-              ], // ✅ tutup Stack
+              ],
             );
-          } else {
-            return const Center(child: CircularProgressIndicator());
           }
+
+          if (snapshot.hasError) {
+            return Center(
+              child: Text(
+                "Error kamera: ${snapshot.error}",
+                style: const TextStyle(color: Colors.white),
+              ),
+            );
+          }
+
+          return const Center(child: CircularProgressIndicator());
         },
-      ), // ✅ tutup FutureBuilder
-    ); // ✅ tutup Scaffold
+      ),
+    );
   }
-} // ✅ tutup class
+}
